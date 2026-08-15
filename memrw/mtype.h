@@ -17,4 +17,4 @@ static inline bool is_devmem(phys_addr_t paddr)
 	return !pfn_valid(pfn) || PageReserved(pfn_to_page(pfn));
 }
 
-#endif
+#endif /* _MTYPE_H */
