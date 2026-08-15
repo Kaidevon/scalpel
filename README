@@ -1,6 +1,6 @@
 # Scalpel
 
-Scalpel is a Linux kernel module designed for stealth file hiding and direct process/device memory access. It provides a character device (`/dev/scalpel`) through which user-space tools can hide files from directory listings and perform low-level memory read/write operations.
+Scalpel is a Linux kernel module designed for stealth file hiding and direct process/device memory access. It provides a character device (`/dev/scalpel`) through which user‑space tools can hide files from directory listings and perform low‑level memory read/write operations.
 
 > **WARNING**: This module manipulates kernel internals and can easily crash your system, corrupt data, or be abused for malicious purposes. For research and educational testing only. The author assumes no responsibility for any damage caused.
 
@@ -8,11 +8,26 @@ Scalpel is a Linux kernel module designed for stealth file hiding and direct pro
 
 ## Features
 
-- **File hiding**: Write an absolute path to `/dev/scalpel` to hide the corresponding inode from non-root users. The file disappears from directory listings and path lookups.
+- **File hiding**: Write an absolute path to `/dev/scalpel` to hide the corresponding inode from non‑root users. The file disappears from directory listings and path lookups **only on memory‑backed filesystems (tmpfs, devtmpfs)**.
 - **Virtual memory read/write**: Read or write another process's virtual memory using `pid` and virtual address.
 - **Device physical memory read/write**: Read or write physical memory ranges that belong to reserved/device memory (e.g., MMIO).
-- **Device memory detection**: Check whether a given virtual address maps to device memory (reserved or non-RAM).
-- **Module self-hiding**: Renames the module's sysfs directory and the misc device's sysfs entry to random names at load time to make detection harder.
+- **Device memory detection**: Check whether a given virtual address maps to device memory (reserved or non‑RAM).
+- **Module self‑hiding**: Renames the module's sysfs directory and the misc device's sysfs entry to random names at load time to make detection harder.
+
+---
+
+## Supported Kernels & Tested Devices
+
+| Android Version | Kernel Version | Status |
+|-----------------|----------------|--------|
+| Android 12      | 5.10           | Tested (GKI) |
+| Android 13      | 5.10           | Tested (GKI) |
+| Android 13      | 5.15           | Tested (GKI) |
+| Android 14      | 6.1            | Tested (GKI) |
+| Android 15      | 6.6            | Tested (GKI) |
+| Android 16      | 6.12           | Tested (GKI) |
+
+The above kernel versions have been verified to build and load successfully. However, **file hiding functionality is only guaranteed on memory‑backed filesystems** such as `tmpfs` or `devtmpfs`. It is **not supported** on disk filesystems (ext4, f2fs, etc.) in this release.
 
 ---
 
@@ -52,7 +67,7 @@ If the device node is renamed, you will see something like:
 scalpel: misc device sysfs dir renamed to xxxxxxxxx
 ```
 
-In that case, the `/dev/scalpel` node may also be renamed. You can locate the actual device node by checking `/dev/` for a newly created character device with major number 10 and a random name, or by looking at the kernel log.
+**Important**: The module also hides the `/dev/scalpel` node itself from non‑root users (`uid != 0`) at load time. This means that after loading, the device node may become inaccessible to non‑root users.
 
 To remove the module:
 
@@ -66,7 +81,7 @@ sudo rmmod scalpel
 
 ### Hiding a File
 
-1. Open the scalpel device node (the real path after loading).
+1. Open the scalpel device node (the real path after loading, if accessible).
 2. Write the absolute path of the file/directory you want to hide.
 3. Close the device.
 
@@ -76,9 +91,9 @@ Example using `echo`:
 echo -n "/home/user/secret.txt" > /dev/scalpel
 ```
 
-The file becomes invisible to non-root users. To unhide, simply unload the module (all hidden files reappear).
+The file becomes invisible to non‑root users **only if it resides on a memory‑backed filesystem**. To unhide, simply unload the module (all hidden files reappear).
 
-**Note**: Hidden files should not be modified, renamed, or deleted while hidden; the internal VFS state is manipulated and such operations may fail or cause instability.
+**Note**: Hidden files should not be modified, renamed, or deleted while hidden; the internal VFS state is manipulated and such operations may fail or cause instability. This is especially true for the current implementation, which does not handle all VFS operations.
 
 ---
 
@@ -159,20 +174,20 @@ close(fd);
 
 ## How It Works (Brief)
 
-- **File hiding**: The module maintains a list of hidden inode numbers. It registers kretprobes on `__d_lookup` and `__d_lookup_rcu` to intercept dentry lookups. If the dentry's inode is hidden and the caller is not root, the lookup returns NULL. Additionally, the dentry is physically unlinked from its parent's `d_subdirs` list to ensure it does not appear in directory enumeration.
+- **File hiding**: The module maintains a list of hidden inode numbers. It registers kretprobes on `__d_lookup` and `__d_lookup_rcu` to intercept dentry lookups. If the dentry's inode is hidden and the caller is not root, the lookup returns NULL. Additionally, the dentry is physically unlinked from its parent's `d_subdirs` list to ensure it does not appear in directory enumeration **on memory‑backed filesystems**. This approach does **not** work for disk filesystems because directory enumeration reads directly from disk, not from the dcache.
 - **Memory access**:
-  - Virtual memory: `vmem_read`/`vmem_write` walk the target process's page tables using `follow_pte` and copy data page by page.
+  - Virtual memory: `vmem_read`/`vmem_write` walk the target process's page tables using `follow_pte` (or `get_user_pages_remote` on kernel 6.12+) and copy data page by page.
   - Device memory: The virtual address is first translated to a physical address using the target process's page tables. If the physical address is considered device memory (via `pfn_valid` and `PageReserved`), `ioremap` is used to map it and perform I/O memory copy.
 
 ---
 
 ## Known Limitations / Warnings
 
-- **Instability**: This module directly modifies kernel VFS internals and can lead to kernel panics, use-after-free, or deadlocks under certain conditions.
-- **Hidden file restrictions**: Do not rename, unlink, or modify hidden files while the module is loaded. The VFS state is inconsistent and such operations can cause crashes or undefined behaviour.
+- **Instability**: This module directly modifies kernel VFS internals and can lead to kernel panics, use‑after‑free, or deadlocks under certain conditions.
+- **Hidden file restrictions**: Do not rename, unlink, or modify hidden files while the module is loaded. The VFS state is inconsistent and such operations can cause crashes or undefined behaviour. This is especially true for the current implementation, which does not handle all VFS operations.
 - **Root user bypass**: The file hiding mechanism intentionally does **not** hide files from the root user (`uid 0`). This is by design in the current code.
-- **Device node rename**: The module renames its own sysfs entries to random strings at load time. This may cause `/dev/scalpel` to disappear or be replaced by a randomly named node. Check `dmesg` for the actual name.
-- **Kernel symbol dependency**: The module relies on `kallsyms_lookup_name` (obtained via kprobe) and `follow_pte` being available. It may not work on kernels where these symbols are restricted or changed.
+- **Device node rename/hiding**: The module renames its own sysfs entries to random strings at load time. Additionally, it hides `/dev/scalpel` itself for `uid != 0`. This may make the device node inaccessible to non‑root users after loading.
+- **Kernel symbol dependency**: The module relies on `kallsyms_lookup_name` (obtained via kprobe) and `follow_pte` being available. It may not work on kernels where these symbols are restricted or changed (e.g., 6.12+ uses a different path for page table walking).
 - **No multi‑core safety**: Some hide/unhide operations may not be fully safe under concurrent access. Use with caution.
 
 ---
@@ -187,3 +202,7 @@ This project is licensed under the GNU General Public License v2.0. See the `SPD
 
 - **Author**: Kaidevon
 - **Email**: [kaidevonmail@gmail.com](mailto:kaidevonmail@gmail.com)
+
+---
+
+*Version: v0.0.1*
