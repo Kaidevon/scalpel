@@ -1,9 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * scalpel/memrw/memrw.h
+ * include/uapi/scalpel/memrw.h
  *
  * Copyright (C) 2026 Kaidevon
  *
+ * Scalpel memory read/write UAPI header.
  */
 #ifndef _UAPI_MEMRW_H
 #define _UAPI_MEMRW_H
@@ -16,35 +17,35 @@
 struct devmem_read_arg {
 	__kernel_pid_t pid;
 	unsigned long vaddr;
-	void __user *buf;
+	void *buf;
 	__kernel_size_t size;
 };
 
 struct devmem_write_arg {
 	__kernel_pid_t pid;
 	unsigned long vaddr;
-	const void __user *buf;
+	const void *buf;
 	__kernel_size_t size;
 };
 
 struct vmem_read_arg {
 	__kernel_pid_t pid;
 	unsigned long vaddr;
-	void __user *buf;
+	void *buf;
 	__kernel_size_t size;
 };
 
 struct vmem_write_arg {
 	__kernel_pid_t pid;
 	unsigned long vaddr;
-	const void __user *buf;
+	const void *buf;
 	__kernel_size_t size;
 };
 
 struct is_devmem_arg {
 	__kernel_pid_t pid;
 	unsigned long vaddr;
-	__u8 __user *result;
+	__u8 *result;
 	__kernel_size_t size;
 };
 
